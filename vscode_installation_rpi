@@ -1,0 +1,32 @@
+Steps to Install VS Code on ARM64
+ 
+1. Update system package lists
+     
+     sudo apt update && sudo apt upgrade -y
+
+2. Download VS Code for ARM64
+     
+     wget -O vscode_arm64.deb "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-arm64"
+
+3.  Check if the file is downloaded
+
+     ls -l vscode_arm64.deb
+
+4. Install the .deb package
+
+     sudo dpkg -i vscode_arm64.deb
+
+5.  Fix missing dependencies (if installation fails)
+
+     sudo apt --fix-broken install -y
+     sudo dpkg -i vscode_arm64.deb
+
+6. Launch VS Code
+
+     code
+
+7. Check if VS Code is installed correctly
+
+     code --version
+
+
