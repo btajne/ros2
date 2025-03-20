@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<dds>
+    <profiles>
+        <participant profile_name="default" is_default_profile="true">
+            <rtps>
+                <builtin>
+                    <use_simpleEDP>true</use_simpleEDP>
+                    <enable_builtin_transport_services>true</enable_builtin_transport_services>
+                    <initialPeersList>
+                        <address>100.116.14.43</address>  <!-- Device 2's Tailscale IP -->
+                    </initialPeersList>
+                </builtin>
+                <useBuiltinTransports>false</useBuiltinTransports>
+                <userTransports>
+                    <transport_id>UDPTransport</transport_id>
+                </userTransports>
+            </rtps>
+        </participant>
+    </profiles>
+</dds>
