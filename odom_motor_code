@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+
+import rclpy
+from rclpy.node import Node
+from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Quaternion
+import math
+import time
+from tf_transformations import quaternion_from_euler
+import tf2_ros
+import geometry_msgs.msg
+
+from gpiozero import RotaryEncoder
+from PCA9685 import PCA9685  # Import your PCA9685 motor driver
+
+class OdomMotorPublisher(Node):
+    def __init__(self):
+        super().__init__('odom_motor_publisher')
+
+        # Encoder setup (your GPIO pins)
+        self.left_encoder = RotaryEncoder(a=17, b=18)
+        self.right_encoder = RotaryEncoder(a=22, b=23)
+
+        # Motor driver setup
+        self.Dir = ['forward', 'backward']
+        self.pwm = PCA9685(0x40, debug=False)  # Make sure your address is correct (Check: sudo i2cdetect -y 1)
+        self.pwm.setPWMFreq(50)
+
+        # Motor channel definitions
+        self.PWMA = 0
+        self.AIN1 = 1
+        self.AIN2 = 2
+        self.PWMB = 5
+        self.BIN1 = 3
+        self.BIN2 = 4
+
+        # Robot parameters
+        self.wheel_radius = 0.033  # meters
+        self.wheel_base = 0.160    # meters (distance between wheels)
+        self.ticks_per_revolution = 840  # ✅ Based on your encoder spec
+
+        # Robot state
+        self.x = 0.0
+        self.y = 0.0
+        self.theta = 0.0
+
+        # Encoder previous tick values
+        self.last_left = 0
+        self.last_right = 0
+
+        # Flag to ensure motor starts after node init
+        self.motor_started = False
+
+        # ROS 2 publisher
+        self.odom_pub = self.create_publisher(Odometry, 'odom', 10)
+        self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
+
+        # Timer to publish odometry and control motors
+        self.timer = self.create_timer(0.1, self.update_odom)  # 10 Hz
+
+    def run_motor(self, motor, direction, speed):
+        if speed > 100:
+            speed = 100
+        if motor == 0:
+            self.pwm.setDutycycle(self.PWMA, speed)
+            if direction == 'forward':
+                self.pwm.setLevel(self.AIN1, 0)
+                self.pwm.setLevel(self.AIN2, 1)
+            else:
+                self.pwm.setLevel(self.AIN1, 1)
+                self.pwm.setLevel(self.AIN2, 0)
+        else:
+            self.pwm.setDutycycle(self.PWMB, speed)
+            if direction == 'forward':
+                self.pwm.setLevel(self.BIN1, 0)
+                self.pwm.setLevel(self.BIN2, 1)
+            else:
+                self.pwm.setLevel(self.BIN1, 1)
+                self.pwm.setLevel(self.BIN2, 0)
+
+    def update_odom(self):
+        # ✅ Start motors only once after node is initialized
+        if not self.motor_started:
+            print("Starting motors...")
+            self.run_motor(0, 'forward', 50)  # Motor 1
+            self.run_motor(1, 'forward', 50)  # Motor 2
+            self.motor_started = True
+
+        # Read encoder steps
+        left_ticks = self.left_encoder.steps
+        right_ticks = self.right_encoder.steps
+
+        # Debugging encoder counts
+        print(f"Left Encoder Tick: {left_ticks} | Right Encoder Tick: {right_ticks}")
+
+        # Calculate tick difference
+        delta_left = left_ticks - self.last_left
+        delta_right = right_ticks - self.last_right
+
+        self.last_left = left_ticks
+        self.last_right = right_ticks
+
+        # Convert ticks to distance
+        distance_per_tick = (2 * math.pi * self.wheel_radius) / self.ticks_per_revolution
+
+        left_distance = delta_left * distance_per_tick
+        right_distance = delta_right * distance_per_tick
+
+        delta_distance = (right_distance + left_distance) / 2.0
+        delta_theta = (right_distance - left_distance) / self.wheel_base
+
+        self.x += delta_distance * math.cos(self.theta + delta_theta / 2.0)
+        self.y += delta_distance * math.sin(self.theta + delta_theta / 2.0)
+        self.theta += delta_theta
+        self.theta = math.atan2(math.sin(self.theta), math.cos(self.theta))  # Normalize
+
+        # Create quaternion from yaw angle
+        q = quaternion_from_euler(0, 0, self.theta)
+
+        # Publish Odometry message
+        odom = Odometry()
+        odom.header.stamp = self.get_clock().now().to_msg()
+        odom.header.frame_id = "odom"
+        odom.child_frame_id = "base_link"
+
+        odom.pose.pose.position.x = self.x
+        odom.pose.pose.position.y = self.y
+        odom.pose.pose.orientation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
+
+        odom.twist.twist.linear.x = delta_distance / 0.1
+        odom.twist.twist.angular.z = delta_theta / 0.1
+
+        self.odom_pub.publish(odom)
+
+        # Publish TF transform
+        t = geometry_msgs.msg.TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = 'odom'
+        t.child_frame_id = 'base_link'
+        t.transform.translation.x = self.x
+        t.transform.translation.y = self.y
+        t.transform.translation.z = 0.0
+        t.transform.rotation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
+        self.tf_broadcaster.sendTransform(t)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = OdomMotorPublisher()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
